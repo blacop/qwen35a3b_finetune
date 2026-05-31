@@ -1,0 +1,11 @@
+[Unit]
+Description=Restrict internal AI model ports to localhost
+After=network.target nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/qwen35a3b_finetune/scripts/apply_public_port_guard.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

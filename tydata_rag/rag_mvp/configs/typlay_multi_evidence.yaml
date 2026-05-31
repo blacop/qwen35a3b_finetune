@@ -1,0 +1,60 @@
+project:
+  name: rag_mvp_typlay_multi_evidence
+  language: zh
+
+ingest:
+  source_dir: /video-storage/ai-customer/qwen35a3b_finetune/rag/typlay/text_all
+  source_glob: "*.txt"
+  source_format: extracted_text
+  note: docx_and_pdf_pre_extracted_to_txt
+
+chunk:
+  chunk_size: 560
+  overlap: 112
+  min_chunk_chars: 20
+  preserve_paragraphs: true
+  dedupe_adjacent: false
+
+index:
+  output_dir: /video-storage/ai-customer/qwen35a3b_finetune/rag/typlay/rag_index_typlay_default_560_112
+  ngram_min: 1
+  ngram_max: 3
+  dense_backend: svd
+  dense_dim: 256
+
+paths:
+  corpus_dir: /video-storage/ai-customer/qwen35a3b_finetune/rag/typlay/text_all
+  index_dir: /video-storage/ai-customer/qwen35a3b_finetune/rag/typlay/rag_index_typlay_default_560_112
+  eval_dataset: /home/ubuntu/generate/tydata_rag/rag_mvp/data/eval/eval_questions_multi_evidence.jsonl
+  output_dir: /home/ubuntu/generate/tydata_rag/rag_mvp/outputs/multi_evidence_20260523
+
+retrieval:
+  backend: local
+  mode: hybrid
+  fusion: rrf
+  top_k: 8
+  min_score: 0.0
+  min_score_vec: 0.0
+  candidate_k: 80
+  rrf_k: 80
+  weight_lex: 0.7
+  weight_vec: 0.3
+  enable_rerank: true
+  enable_diversity: true
+  max_per_source: 1
+  max_per_family: 4
+  diversity_lambda: 0.5
+  source_match_weight: 0.12
+
+api:
+  base_url: http://127.0.0.1:18080
+  api_key: ""
+  timeout_s: 30
+
+evaluation:
+  recall_k: [1, 3, 5]
+  support_top_k: 8
+  require_source_file_match: true
+  require_evidence_contains: true
+  output_prefix: typlay_multi_evidence
+  max_rows: 0

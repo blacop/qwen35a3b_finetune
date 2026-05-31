@@ -1,0 +1,11 @@
+[Unit]
+Description=Run daily GPU5/GPU7 inference report at 00:10 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:10:00
+AccuracySec=1min
+Persistent=true
+Unit=daily-inference-report.service
+
+[Install]
+WantedBy=timers.target

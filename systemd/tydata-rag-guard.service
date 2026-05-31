@@ -1,0 +1,13 @@
+[Unit]
+Description=Tydata RAG Guard (Auto Rollback)
+After=network.target tydata-rag-api.service
+Wants=tydata-rag-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=RAG_GUARD_ENV_FILE=%h/generate/qwen35a3b_finetune/tydata_rag/rag_guard.env
+ExecStart=/bin/bash -lc '/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/run_rag_guard.sh'
+StandardOutput=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/runtime/rag_guard/guard.log
+StandardError=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/runtime/rag_guard/guard.log

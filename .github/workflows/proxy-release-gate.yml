@@ -1,0 +1,71 @@
+name: proxy-release-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Proxy base URL (without /v1), e.g. http://127.0.0.1:8001"
+        required: true
+        default: "http://127.0.0.1:8001"
+      model:
+        description: "Served model name"
+        required: true
+        default: "gpu5-v5.1f-merged"
+      repeat_runs:
+        description: "Repeat count for kb40/ops16 stability reruns"
+        required: true
+        default: "3"
+      ts:
+        description: "Optional run timestamp"
+        required: false
+        default: ""
+
+jobs:
+  gate:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve timestamp
+        id: resolve_ts
+        run: |
+          TS_INPUT="${{ inputs.ts }}"
+          if [ -n "$TS_INPUT" ]; then
+            TS="$TS_INPUT"
+          else
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          fi
+          echo "ts=$TS" >> "$GITHUB_OUTPUT"
+          echo "Resolved TS=$TS"
+
+      - name: Run proxy release gate
+        env:
+          PROJECT_ROOT: /home/ubuntu/qwen35a3b_finetune
+          BASE_URL: ${{ inputs.base_url }}
+          MODEL: ${{ inputs.model }}
+          REPEAT_RUNS: ${{ inputs.repeat_runs }}
+          TS: ${{ steps.resolve_ts.outputs.ts }}
+          OUT_DIR: /home/ubuntu/qwen35a3b_finetune/eval_outputs/proxy_release_gate_ci_${{ steps.resolve_ts.outputs.ts }}
+        run: |
+          cd /home/ubuntu/qwen35a3b_finetune
+          bash scripts/run_proxy_release_gate_ci.sh
+
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-release-gate-${{ steps.resolve_ts.outputs.ts }}
+          path: |
+            /home/ubuntu/qwen35a3b_finetune/eval_outputs/proxy_release_gate_ci_${{ steps.resolve_ts.outputs.ts }}
+          if-no-files-found: warn
+
+      - name: Publish gate report
+        if: always()
+        run: |
+          REPORT="/home/ubuntu/qwen35a3b_finetune/eval_outputs/proxy_release_gate_ci_${{ steps.resolve_ts.outputs.ts }}/release_gate_report.md"
+          SUMMARY="/home/ubuntu/qwen35a3b_finetune/eval_outputs/proxy_release_gate_ci_${{ steps.resolve_ts.outputs.ts }}/release_gate_summary.json"
+          ls -la "$(dirname "$REPORT")" || true
+          cat "$REPORT" || true
+          cat "$SUMMARY" || true

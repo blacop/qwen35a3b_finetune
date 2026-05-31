@@ -1,0 +1,12 @@
+[Unit]
+Description=Generate daily GPU5/GPU7 inference report
+After=network.target dpo-guardrails-proxy-gpu5.service dpo-guardrails-proxy.service tydata-rag-api.service tydata-rag-api-gpu7.service mm-rag-api.service
+Wants=dpo-guardrails-proxy-gpu5.service dpo-guardrails-proxy.service tydata-rag-api.service tydata-rag-api-gpu7.service mm-rag-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -lc '/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/daily_inference_report.sh'
+StandardOutput=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/runtime/daily_inference_report/report.log
+StandardError=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/runtime/daily_inference_report/report.log

@@ -1,0 +1,214 @@
+version: "1.0"
+project: "sports_cs_gap_pack_12k"
+seed: 20260408
+timezone: "UTC"
+locale: "zh-CN"
+
+input:
+  templates_jsonl: "/home/ubuntu/qwen35a3b_finetune/templates/templates_100.jsonl"
+  strict_template_fields: true
+  required_template_fields:
+    - template_id
+    - scenario
+    - intent
+    - sub_intent
+    - title
+    - target_count
+    - required_slots
+    - dialog_flow
+    - allowed_tones
+    - turn_range
+
+generation:
+  total_samples: 12000
+  mode: "quota_then_weighted_template_sampling"
+  scenario_quota:
+    bet_abnormal: 3000
+    parlay_settlement: 2500
+    live_delay: 2000
+    odds_anomaly: 2000
+    risk_limit: 2500
+  template_sampling:
+    weight_field: "target_count"
+    min_per_template: 60
+    max_per_template: 220
+
+variation_rules:
+  tone_distribution:
+    professional_neutral: 0.40
+    empathetic: 0.25
+    concise_actionable: 0.20
+    firm_compliance: 0.10
+    high_pressure_deescalation: 0.05
+
+  turn_bucket_distribution:
+    "4-5": 0.35
+    "6-7": 0.40
+    "8-10": 0.25
+
+sla_policy:
+  default:
+    ack: "3-5分钟回执"
+    l1: "15分钟内复核"
+    l2: "1小时内升级反馈"
+  by_scenario:
+    bet_abnormal:
+      - "3-5分钟回执"
+      - "15分钟内复核"
+      - "1小时内升级结果"
+    parlay_settlement:
+      - "赛果确认后自动结算"
+      - "30分钟内二次核验"
+      - "超时提交运营复核"
+    live_delay:
+      - "5-15分钟延迟属正常区间"
+      - "超过30分钟自动转工单"
+    odds_anomaly:
+      - "15分钟内风控复核"
+      - "规则解释即时回复"
+    risk_limit:
+      - "1小时内受理"
+      - "24小时内初审"
+      - "48小时内复审"
+
+escalation_policy:
+  levels: ["L0", "L1", "L2", "L3"]
+  distribution:
+    L0: 0.35
+    L1: 0.40
+    L2: 0.20
+    L3: 0.05
+
+slot_filling:
+  generators:
+    "<ACCOUNT>":
+      type: "regex"
+      pattern: "^[a-zA-Z0-9_]{6,14}$"
+    "<BET_ID>":
+      type: "regex"
+      pattern: "^BET[0-9]{8}$"
+    "<ORDER_ID>":
+      type: "regex"
+      pattern: "^ORD[0-9]{10}$"
+    "<SPORT>":
+      type: "enum"
+      values: ["足球", "篮球", "网球", "电竞"]
+    "<LEAGUE>":
+      type: "enum"
+      values: ["英超", "西甲", "欧冠", "NBA", "CBA"]
+    "<MATCH>":
+      type: "enum"
+      values: ["主队vs客队", "红队vs蓝队", "A队vsB队"]
+    "<MARKET>":
+      type: "enum"
+      values: ["让球", "大小", "独赢", "单双", "胜分差"]
+    "<SELECTION>":
+      type: "enum"
+      values: ["主队", "客队", "大", "小", "单", "双"]
+    "<ODDS>":
+      type: "float"
+      min: 1.01
+      max: 15.00
+      precision: 2
+    "<STAKE>":
+      type: "int"
+      min: 20
+      max: 20000
+    "<PAYOUT>":
+      type: "int"
+      min: 0
+      max: 300000
+    "<BET_TIME>":
+      type: "datetime"
+    "<EVENT_TIME>":
+      type: "datetime"
+    "<STATUS>":
+      type: "enum"
+      values: ["待处理", "待结算", "已结算", "已作废", "复核中"]
+    "<VOID_REASON>":
+      type: "enum"
+      values: ["赛事取消", "盘口误开", "数据源异常", "规则触发作废"]
+    "<DELAY_REASON>":
+      type: "enum"
+      values: ["VAR回看", "数据源同步延迟", "赛事中断", "官方赛果未确认"]
+    "<RISK_REASON>":
+      type: "enum"
+      values: ["异常投注模式", "账户安全触发", "合规审核", "可疑资金行为"]
+    "<LIMIT_TYPE>":
+      type: "enum"
+      values: ["单注限额", "单日限额", "玩法限额", "赛事限额"]
+    "<LIMIT_VALUE>":
+      type: "int"
+      min: 50
+      max: 50000
+    "<SLA_MIN>":
+      type: "enum"
+      values: ["3分钟", "5分钟", "15分钟", "30分钟"]
+    "<SLA_HOUR>":
+      type: "enum"
+      values: ["1小时", "24小时", "48小时"]
+    "<TICKET_ID>":
+      type: "regex"
+      pattern: "^TK[0-9]{9}$"
+    "<APPEAL_PATH>":
+      type: "enum"
+      values: ["在线客服工单", "风控申诉入口", "运营复核通道"]
+    "<EVIDENCE_TYPE>":
+      type: "enum"
+      values: ["注单截图", "转账凭证", "比赛时间截图", "设备日志"]
+    "<CHANNEL>":
+      type: "enum"
+      values: ["web", "app", "telegram"]
+    "<DEVICE>":
+      type: "enum"
+      values: ["iOS", "Android", "Windows", "Mac"]
+    "<IP_REGION>":
+      type: "enum"
+      values: ["CN", "HK", "SG", "MY", "TH"]
+    "<LANG>":
+      type: "enum"
+      values: ["zh-CN"]
+    "<NEXT_ACTION>":
+      type: "enum"
+      values: ["提交工单", "等待复核", "补充资料", "转运营处理"]
+
+safety:
+  hard_block_patterns:
+    - "保证盈利"
+    - "包赢"
+    - "代付"
+    - "跑分"
+    - "洗钱"
+    - "伪造身份证"
+  on_violation: "mark_and_keep"
+
+quality:
+  min_chars_per_assistant_turn: 4
+  max_chars_per_assistant_turn: 320
+  drop_low_value_reply_only:
+    enabled: true
+    phrases: ["好的", "谢谢", "ok", "嗯", "收到"]
+  require_qa_pair: true
+  dedup:
+    method: "dialog_hash"
+    keep: "first"
+
+split:
+  train: 0.94
+  val: 0.03
+  test: 0.03
+
+outputs:
+  root_dir: "/home/ubuntu/qwen35a3b_finetune/datasets/generated_12k"
+  sft_jsonl: "sft_openai_messages_12k.jsonl"
+  cls_jsonl: "intent_cls_12k.jsonl"
+  rag_faq_jsonl: "faq_qa_12k.jsonl"
+  stats_csv: "stats_12k.csv"
+  summary_md: "summary_12k.md"
+  merged_sft_jsonl: "/home/ubuntu/qwen35a3b_finetune/datasets/sft_openai_messages.jsonl"
+  merged_backup_prefix: "/home/ubuntu/qwen35a3b_finetune/datasets/sft_openai_messages.backup"
+
+run_control:
+  workers: 8
+  resume: true
+  dry_run: false

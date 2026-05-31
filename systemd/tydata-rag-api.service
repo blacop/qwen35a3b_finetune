@@ -1,0 +1,18 @@
+[Unit]
+Description=Tydata RAG API gateway
+After=network.target dpo-guardrails-proxy-gpu5.service
+Requires=dpo-guardrails-proxy-gpu5.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/generate/qwen35a3b_finetune/tydata_rag/rag_api.env
+ExecStart=/bin/bash -lc '/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/start_rag_api.sh'
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/rag_api.log
+StandardError=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/rag_api.log
+
+[Install]
+WantedBy=default.target

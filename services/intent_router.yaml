@@ -1,0 +1,642 @@
+version: "1.0"
+name: "ai_customer_service_intent_router"
+updated_at_utc: "2026-05-08T00:00:00Z"
+
+metadata:
+  source_docs:
+    - "/tmp/AI客服设计草案.docx"
+    - "https://m.suncidi.com/api/user/swagger/index.html"
+    - "https://m.suncidi.com/api/user/swagger/doc.json"
+  notes:
+    - "本配置用于 agent 前置路由，不替代模型的最终生成。"
+    - "工具执行由 /v1/chat/completions/agent 完成；本路由负责意图分流与工具链建议。"
+
+runtime:
+  max_tool_calls_per_turn: 4
+  max_retry_per_tool: 1
+  tool_timeout_seconds: 20
+  detect_intent_first: true
+  default_confidence_threshold: 0.75
+  require_user_access_header: "X-User-Access-Token"
+  response_policy:
+    no_guess_for_finance_and_account: true
+    ask_missing_slots_before_tool: true
+    redact_internal_errors: true
+
+global_fallback:
+  on_no_route:
+    action: "handover_to_human"
+    reason: "no_route_matched"
+    priority: "normal"
+  on_tool_timeout:
+    action: "retry_then_handover"
+    retry_times: 1
+    handover_reason: "tool_timeout"
+  on_tool_http_error:
+    action: "retry_then_handover"
+    retry_times: 1
+    handover_reason: "tool_http_error"
+  on_missing_auth_for_protected_tool:
+    action: "ask_user_to_login_or_provide_token"
+    user_message_template: "需要先完成登录验证后才能查询该信息，请先登录或重新授权。"
+  on_missing_required_slots:
+    action: "ask_followup_questions"
+  on_high_risk:
+    action: "handover_to_human"
+    priority: "high"
+    conditions:
+      any:
+        - "amount > 2000"
+        - "captcha_fail_count >= 3"
+        - "explicit_human_request == true"
+        - "risk_level in ['high','critical']"
+
+slot_prompts:
+  time_range:
+    - "请提供查询时间范围（开始时间和结束时间）。"
+  order_no:
+    - "请提供订单号（注单号/充值单号/提款单号）。"
+  vendor_id:
+    - "请提供平台ID（vendorId）。"
+  game_type_id:
+    - "请提供游戏类型ID（gameTypeId）。"
+  event_filter:
+    - "请提供活动类型(type)和货币(currency)。"
+  user_id:
+    - "请提供会员ID（user_id）。"
+  round_id:
+    - "请提供游戏局号（round_id）。"
+
+router:
+  route_order:
+    - "manual_handover"
+    - "password_reset_manual"
+    - "single_order_status_query"
+    - "bet_order_query"
+    - "bet_order_filter_query"
+    - "activity_event_discovery"
+    - "activity_eligibility_and_claim"
+    - "recharge_exception"
+    - "withdraw_exception"
+    - "account_balance_and_vendor_balance"
+    - "account_security_and_binding"
+    - "platform_risk_or_login_issue"
+    - "account_restriction_scope"
+    - "game_result_dispute"
+    - "status_dictionary_query"
+    - "promo_history_query"
+
+  intents:
+    - id: "manual_handover"
+      description: "用户明确要求人工"
+      match:
+        any_keywords:
+          - "转人工"
+          - "人工客服"
+          - "找人工"
+          - "人工处理"
+          - "人工介入"
+        regex_any:
+          - "(?i)human|manual"
+      route:
+        steps:
+          - tool: "handover_to_human"
+            args:
+              session_id: "${session_id}"
+              reason: "user_requested_human"
+              priority: "high"
+              context:
+                user_id: "${user_id}"
+                latest_user_query: "${latest_user_query}"
+                detected_intent: "${detected_intent}"
+        success_reply_template: "已为您转接人工客服，工单号：${tool.handover_to_human.ticket_id}"
+      fallback:
+        action: "none"
+
+    - id: "password_reset_manual"
+      description: "忘记登录密码/资金密码，需人工审核修改"
+      match:
+        any_keywords:
+          - "忘记密码"
+          - "密码忘了"
+          - "资金密码忘了"
+          - "重置密码"
+          - "修改密码才能登录"
+      route:
+        steps:
+          - tool: "handover_to_human"
+            args:
+              session_id: "${session_id}"
+              reason: "password_reset_requires_manual_review"
+              priority: "high"
+              context:
+                user_id: "${user_id}"
+                latest_user_query: "${latest_user_query}"
+                required_materials: "账号、注册手机号/邮箱、最近登录设备信息"
+        success_reply_template: "该问题需人工审核后处理，已为您转接人工客服，工单号：${tool.handover_to_human.ticket_id}"
+      fallback:
+        action: "none"
+
+    - id: "single_order_status_query"
+      description: "单笔注单未结算/二次结算/数据变动查询"
+      match:
+        any_keywords:
+          - "注单未结算"
+          - "为什么还未结算"
+          - "二次结算"
+          - "注单变动"
+          - "数据有变化"
+          - "结算状态"
+      slots:
+        required:
+          - "order_no"
+        optional:
+          - "user_id"
+      route:
+        steps:
+          - tool: "query_order"
+            args:
+              order_id: "${slots.order_no}"
+              user_id: "${slots.user_id|default:''}"
+          - tool: "handover_to_human"
+            condition: "tool.query_order.ok != true"
+            args:
+              session_id: "${session_id}"
+              reason: "single_order_query_needs_manual_followup"
+              priority: "high"
+              context:
+                user_id: "${slots.user_id|default:''}"
+                order_no: "${slots.order_no}"
+                latest_user_query: "${latest_user_query}"
+        success_reply_template: "已查询当前注单状态；如涉及二次结算或争议，已同步转人工继续跟进。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "order_no"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "single_order_query_failed"
+
+    - id: "bet_order_query"
+      description: "投注记录与统计查询"
+      match:
+        any_keywords:
+          - "投注记录"
+          - "注单"
+          - "订单"
+          - "已结算"
+          - "未结算"
+          - "投注统计"
+          - "输赢"
+        regex_any:
+          - "(?i)order|bet|settled|unsettled"
+      require_auth: true
+      slots:
+        required:
+          - "createTimeFrom"
+          - "createTimeTo"
+        optional:
+          - "status"
+          - "currency"
+          - "vendorId"
+          - "gameTypeId"
+          - "page"
+          - "pageSize"
+      route:
+        steps:
+          - tool: "list_bet_orders"
+            args:
+              createTimeFrom: "${slots.createTimeFrom}"
+              createTimeTo: "${slots.createTimeTo}"
+              status: "${slots.status|default:''}"
+              currency: "${slots.currency|default:''}"
+              vendorId: "${slots.vendorId|default:''}"
+              gameTypeId: "${slots.gameTypeId|default:''}"
+              page: "${slots.page|default:1}"
+              pageSize: "${slots.pageSize|default:20}"
+          - tool: "get_bet_order_stats"
+            args:
+              createTimeFrom: "${slots.createTimeFrom}"
+              createTimeTo: "${slots.createTimeTo}"
+              status: "${slots.status|default:''}"
+              currency: "${slots.currency|default:''}"
+              vendorId: "${slots.vendorId|default:''}"
+              gameTypeId: "${slots.gameTypeId|default:''}"
+              page: 1
+              pageSize: 20
+          - tool: "get_order_status_list"
+            args: {}
+        success_reply_template: "已为您查询到投注记录与统计结果。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "time_range"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "bet_order_query_failed"
+
+    - id: "bet_order_filter_query"
+      description: "投注按平台/游戏类型筛选前置查询"
+      match:
+        any_keywords:
+          - "游戏平台"
+          - "游戏类型"
+          - "按平台"
+          - "按类型"
+          - "筛选注单"
+      route:
+        steps:
+          - tool: "get_game_type_list"
+            args: {}
+          - tool: "get_game_vendor_list"
+            args: {}
+        success_reply_template: "已获取游戏平台和游戏类型列表，可继续按条件筛选注单。"
+      fallback:
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "bet_filter_prep_failed"
+
+    - id: "activity_event_discovery"
+      description: "活动类型与活动列表查询"
+      match:
+        any_keywords:
+          - "活动列表"
+          - "有哪些活动"
+          - "活动类型"
+          - "优惠活动"
+      slots:
+        optional:
+          - "currency"
+          - "type"
+      route:
+        steps:
+          - tool: "get_event_type_list"
+            args: {}
+          - tool: "get_event_list"
+            condition: "slots.currency != '' and slots.type != ''"
+            args:
+              currency: "${slots.currency}"
+              type: "${slots.type}"
+        success_reply_template: "已获取活动类型与活动列表。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "event_filter"
+
+    - id: "activity_eligibility_and_claim"
+      description: "活动资格核对与领取办理"
+      match:
+        any_keywords:
+          - "领取活动"
+          - "领取彩金"
+          - "活动资格"
+          - "达标"
+          - "任务"
+          - "首充"
+          - "累计充值"
+      require_auth: true
+      slots:
+        required_any:
+          - "user_id"
+          - "activity_name"
+        optional:
+          - "currency"
+          - "activity_id"
+          - "dateFrom"
+          - "dateTo"
+      route:
+        steps:
+          - tool: "get_activity_money_tasks"
+            args: {}
+          - tool: "get_activity_money_tasks_by_currency"
+            condition: "slots.currency != ''"
+            args:
+              currency: "${slots.currency}"
+          - tool: "get_deposit_task_list"
+            condition: "slots.activity_id != ''"
+            args:
+              id: "${slots.activity_id}"
+          - tool: "get_user_bet_tasks"
+            args: {}
+          - tool: "claim_activity_bonus"
+            condition: "slots.user_id != '' and slots.activity_name != ''"
+            args:
+              user_id: "${slots.user_id}"
+              activity_name: "${slots.activity_name}"
+        success_reply_template: "已为您核对活动资格并办理领取请求。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "user_id"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "activity_claim_failed"
+
+    - id: "recharge_exception"
+      description: "充值未到账/掉单处理"
+      match:
+        any_keywords:
+          - "充值没到账"
+          - "入款没到"
+          - "掉单"
+          - "充值异常"
+      require_auth: true
+      slots:
+        required:
+          - "order_no"
+        optional:
+          - "amount"
+          - "occurred_at"
+          - "user_id"
+      route:
+        steps:
+          - tool: "handle_recharge_exception"
+            args:
+              order_no: "${slots.order_no}"
+              user_id: "${slots.user_id|default:''}"
+              amount: "${slots.amount|default:0}"
+              occurred_at: "${slots.occurred_at|default:''}"
+          - tool: "get_deposit_category_stats"
+            condition: "slots.user_id != '' and slots.dateFrom != '' and slots.dateTo != ''"
+            args:
+              userId: "${slots.user_id}"
+              dateFrom: "${slots.dateFrom}"
+              dateTo: "${slots.dateTo}"
+        success_reply_template: "充值异常已提交处理并完成状态核对。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "order_no"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "recharge_exception_failed"
+
+    - id: "withdraw_exception"
+      description: "提款未到账/失败处理"
+      match:
+        any_keywords:
+          - "提款没到账"
+          - "提现失败"
+          - "出款失败"
+          - "提款异常"
+      require_auth: true
+      slots:
+        required:
+          - "order_no"
+        optional:
+          - "amount"
+          - "occurred_at"
+          - "user_id"
+      route:
+        steps:
+          - tool: "handle_withdraw_exception"
+            args:
+              order_no: "${slots.order_no}"
+              user_id: "${slots.user_id|default:''}"
+              amount: "${slots.amount|default:0}"
+              occurred_at: "${slots.occurred_at|default:''}"
+          - tool: "get_user_card_list"
+            args: {}
+        success_reply_template: "提款异常已提交处理并完成银行卡信息核对。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "order_no"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "withdraw_exception_failed"
+
+    - id: "account_balance_and_vendor_balance"
+      description: "账户余额/平台余额核对"
+      match:
+        any_keywords:
+          - "账户余额"
+          - "主账户余额"
+          - "平台余额"
+          - "转账余额"
+      require_auth: true
+      slots:
+        optional:
+          - "vendorId"
+      route:
+        steps:
+          - tool: "get_user_account_list"
+            args: {}
+          - tool: "get_vendor_account_balance"
+            condition: "slots.vendorId != ''"
+            args:
+              vendorId: "${slots.vendorId}"
+        success_reply_template: "已为您查询账户余额信息。"
+      fallback:
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "account_balance_query_failed"
+
+    - id: "account_security_and_binding"
+      description: "账户安全（验证码、密码、绑定）"
+      match:
+        any_keywords:
+          - "改密码"
+          - "资金密码"
+          - "绑定手机"
+          - "验证码"
+          - "账户安全"
+      slots:
+        optional:
+          - "captcha"
+          - "phoneNumber"
+          - "operation"
+          - "user_id"
+      route:
+        steps:
+          - tool: "check_captcha_token"
+            condition: "slots.captcha.key != ''"
+            args:
+              key: "${slots.captcha.key}"
+              x: "${slots.captcha.x|default:0}"
+              y: "${slots.captcha.y|default:0}"
+              angle: "${slots.captcha.angle|default:0}"
+          - tool: "send_bind_sms_captcha"
+            condition: "slots.phoneNumber != ''"
+            args:
+              captchaToken: "${slots.captchaToken|default:''}"
+              phoneNumber: "${slots.phoneNumber}"
+          - tool: "manage_account_info"
+            condition: "slots.user_id != '' and slots.operation != ''"
+            args:
+              user_id: "${slots.user_id}"
+              operation: "${slots.operation}"
+              verify_channel: "${slots.verify_channel|default:'sms'}"
+              target_value: "${slots.target_value|default:''}"
+        success_reply_template: "账户安全流程已执行，请根据验证步骤完成后续操作。"
+      fallback:
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "account_security_failed"
+
+    - id: "platform_risk_or_login_issue"
+      description: "登录失败、风控限制、IP黑名单、平台异常"
+      match:
+        any_keywords:
+          - "登录失败"
+          - "无法登录"
+          - "限制登录"
+          - "账号异常"
+          - "风控"
+          - "解除风控"
+          - "风控原因"
+          - "黑名单"
+          - "卡顿"
+          - "平台问题"
+      slots:
+        optional:
+          - "ip"
+          - "traceId"
+          - "user_id"
+      route:
+        steps:
+          - tool: "check_ip_blacklist"
+            condition: "slots.ip != ''"
+            args:
+              ip: "${slots.ip}"
+              traceId: "${slots.traceId|default:''}"
+          - tool: "diagnose_platform_issue"
+            args:
+              user_id: "${slots.user_id|default:''}"
+              issue_type: "${slots.issue_type|default:'login_failed'}"
+              device_info: "${slots.device_info|default:''}"
+              ip: "${slots.ip|default:''}"
+              description: "${latest_user_query}"
+          - tool: "handover_to_human"
+            args:
+              session_id: "${session_id}"
+              reason: "login_or_risk_issue_requires_manual_review"
+              priority: "high"
+              context:
+                user_id: "${slots.user_id|default:''}"
+                ip: "${slots.ip|default:''}"
+                latest_user_query: "${latest_user_query}"
+                route: "platform_risk_or_login_issue"
+        success_reply_template: "已完成初步核验并转人工/专属客服继续处理，工单号：${tool.handover_to_human.ticket_id}"
+      fallback:
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "platform_risk_issue_failed"
+
+    - id: "account_restriction_scope"
+      description: "账号受限后可否投注/充值/提款范围查询"
+      match:
+        any_keywords:
+          - "账号限制后还能投注吗"
+          - "账号限制后还能充值吗"
+          - "账号限制后还能取款吗"
+          - "受限还能下注吗"
+          - "黑名单限制项"
+          - "风控监测限制项"
+      slots:
+        required:
+          - "user_id"
+      route:
+        steps:
+          - tool: "diagnose_platform_issue"
+            args:
+              user_id: "${slots.user_id}"
+              issue_type: "account_status_abnormal"
+              device_info: "${slots.device_info|default:''}"
+              ip: "${slots.ip|default:''}"
+              description: "${latest_user_query}"
+          - tool: "get_user_account_list"
+            args: {}
+          - tool: "handover_to_human"
+            args:
+              session_id: "${session_id}"
+              reason: "account_restriction_scope_requires_risk_team_reply"
+              priority: "high"
+              context:
+                user_id: "${slots.user_id}"
+                latest_user_query: "${latest_user_query}"
+                route: "account_restriction_scope"
+        success_reply_template: "已记录账号限制范围查询，并转人工/专属客服同步具体限制项，工单号：${tool.handover_to_human.ticket_id}"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "user_id"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "account_restriction_scope_failed"
+
+    - id: "game_result_dispute"
+      description: "派奖异常/游戏结果争议"
+      match:
+        any_keywords:
+          - "派奖异常"
+          - "奖金不对"
+          - "结果争议"
+          - "局号"
+      slots:
+        required:
+          - "game_name"
+          - "round_id"
+        optional:
+          - "user_id"
+          - "dateFrom"
+          - "dateTo"
+      route:
+        steps:
+          - tool: "audit_game_issue"
+            args:
+              user_id: "${slots.user_id|default:''}"
+              game_name: "${slots.game_name}"
+              round_id: "${slots.round_id}"
+              occurred_at: "${slots.occurred_at|default:''}"
+              description: "${latest_user_query}"
+          - tool: "get_game_category_stats"
+            condition: "slots.user_id != '' and slots.dateFrom != '' and slots.dateTo != ''"
+            args:
+              userId: "${slots.user_id}"
+              dateFrom: "${slots.dateFrom}"
+              dateTo: "${slots.dateTo}"
+        success_reply_template: "游戏争议已提交核查。"
+      fallback:
+        on_missing_slots:
+          ask_slots:
+            - "round_id"
+        on_tool_failure:
+          action: "handover_to_human"
+          reason: "game_dispute_failed"
+
+    - id: "status_dictionary_query"
+      description: "状态字典类查询"
+      match:
+        any_keywords:
+          - "订单状态有哪些"
+          - "活动状态有哪些"
+          - "状态列表"
+      route:
+        steps:
+          - tool: "get_order_status_list"
+            args: {}
+          - tool: "get_promo_money_status_list"
+            args: {}
+        success_reply_template: "已获取状态列表。"
+      fallback:
+        on_tool_failure:
+          action: "normal_answer_without_tool"
+
+    - id: "promo_history_query"
+      description: "优惠记录筛选辅助"
+      match:
+        any_keywords:
+          - "优惠记录"
+          - "活动记录"
+          - "返利记录"
+      route:
+        steps:
+          - tool: "get_promo_money_type_list"
+            args: {}
+          - tool: "get_promo_money_status_list"
+            args: {}
+        success_reply_template: "已获取优惠记录筛选条件。"
+      fallback:
+        on_tool_failure:
+          action: "normal_answer_without_tool"

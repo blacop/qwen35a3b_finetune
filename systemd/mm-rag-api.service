@@ -1,0 +1,18 @@
+[Unit]
+Description=MM RAG API (port 18100)
+After=network.target vllm-qwen35-gpu5-agent-upstream.service
+Wants=vllm-qwen35-gpu5-agent-upstream.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/generate/qwen35a3b_finetune/tydata_rag/mm_rag/mm_rag.env
+ExecStart=/bin/bash -lc '/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag/start_mm_rag_api.sh'
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag/runtime_mm_rag.log
+StandardError=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag/runtime_mm_rag.log
+
+[Install]
+WantedBy=default.target

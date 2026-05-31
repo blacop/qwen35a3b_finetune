@@ -1,0 +1,70 @@
+name: gpu7-v6.1-release-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_train:
+        description: "Run full v6.1 training before merge/eval"
+        required: true
+        default: "false"
+      run_merge:
+        description: "Run LoRA merge step"
+        required: true
+        default: "true"
+      ts:
+        description: "Optional run timestamp, e.g. 20260514T054822Z"
+        required: false
+        default: ""
+
+jobs:
+  gate:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve timestamp
+        id: resolve_ts
+        run: |
+          TS_INPUT="${{ inputs.ts }}"
+          if [ -n "$TS_INPUT" ]; then
+            TS="$TS_INPUT"
+          else
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          fi
+          echo "ts=$TS" >> "$GITHUB_OUTPUT"
+          echo "Resolved TS=$TS"
+
+      - name: Run GPU7 v6.1 release pipeline
+        env:
+          PROJECT_ROOT: /home/ubuntu/qwen35a3b_finetune
+          RUN_TRAIN: ${{ inputs.run_train }}
+          RUN_MERGE: ${{ inputs.run_merge }}
+          TS: ${{ steps.resolve_ts.outputs.ts }}
+          CUDA_VISIBLE_DEVICES: "7"
+        run: |
+          cd /home/ubuntu/qwen35a3b_finetune
+          export OUT_DIR="/home/ubuntu/qwen35a3b_finetune/outputs/swift_sft_v6_1_gpu7_${TS}"
+          export TRAIN_LOG="/home/ubuntu/qwen35a3b_finetune/tracking/logs/v6_1_${TS}.log"
+          export MERGED_OUT_DIR="/home/ubuntu/qwen35a3b_finetune/outputs/swift_sft_v6_1_gpu7_${TS}_merged_vllm"
+          export EVAL_OUT_DIR="/home/ubuntu/qwen35a3b_finetune/eval_outputs/v6_1_release_gate_${TS}"
+          bash scripts/run_gpu7_v6_1_release_pipeline.sh
+
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu7-v6_1-release-gate-${{ steps.resolve_ts.outputs.ts }}
+          path: |
+            /home/ubuntu/qwen35a3b_finetune/eval_outputs/v6_1_release_gate_${{ steps.resolve_ts.outputs.ts }}
+            /home/ubuntu/qwen35a3b_finetune/tracking/logs/v6_1_${{ steps.resolve_ts.outputs.ts }}.log
+          if-no-files-found: warn
+
+      - name: Publish release summary
+        if: always()
+        run: |
+          cd /home/ubuntu/qwen35a3b_finetune
+          EVAL_DIR="/home/ubuntu/qwen35a3b_finetune/eval_outputs/v6_1_release_gate_${{ steps.resolve_ts.outputs.ts }}"
+          ls -la "$EVAL_DIR" || true
+          cat "$EVAL_DIR/release_gate_report_strict.md" || true

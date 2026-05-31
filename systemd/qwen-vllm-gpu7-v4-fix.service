@@ -1,0 +1,20 @@
+[Unit]
+Description=Qwen v4 fix GPU7 vLLM OpenAI API Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/qwen35a3b_finetune
+EnvironmentFile=-/home/ubuntu/qwen35a3b_finetune/systemd/qwen_v4_fix_gpu7.service.env
+ExecStart=/bin/bash -lc 'exec /home/ubuntu/qwen35a3b_finetune/systemd/qwen_v4_fix_gpu7_service.sh'
+Restart=always
+RestartSec=10
+LimitNOFILE=1048576
+TimeoutStopSec=45
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

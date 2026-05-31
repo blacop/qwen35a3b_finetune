@@ -1,0 +1,13 @@
+[Unit]
+Description=MM RAG Guard (Health Check + Auto Restart)
+After=network.target mm-rag-api.service
+Wants=mm-rag-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=MM_RAG_GUARD_ENV_FILE=%h/generate/qwen35a3b_finetune/tydata_rag/mm_rag/mm_rag_guard.env
+ExecStart=/bin/bash -lc '/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag/run_mm_rag_guard.sh'
+StandardOutput=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag/runtime_mm_rag_guard.log
+StandardError=append:/home/ubuntu/generate/qwen35a3b_finetune/tydata_rag/mm_rag/runtime_mm_rag_guard.log

@@ -1,0 +1,19 @@
+[Unit]
+Description=Qwen3.5-35B V5 Combined LoRA Training on GPU5
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/qwen35a3b_finetune
+ExecStart=/bin/bash /home/ubuntu/qwen35a3b_finetune/train_v5_gpu5.sh
+Restart=no
+StandardOutput=journal+console
+StandardError=journal+console
+Environment="PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="CUDA_VISIBLE_DEVICES=5"
+Environment="TRANSFORMERS_OFFLINE=1"
+Environment="HF_DATASETS_OFFLINE=1"
+
+[Install]
+WantedBy=multi-user.target
